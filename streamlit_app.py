@@ -29,6 +29,23 @@ def _trim_reference_for_prompt(reference_text: str, max_chars: int = 40_000) -> 
     return reference_text[-max_chars:], True
 
 
+def _detect_prior_relationship(target_group: str) -> bool:
+    """Detect if the target group indicates an existing relationship or brand awareness."""
+    text = target_group.lower()
+    relationship_signals = [
+        "already",
+        "existing",
+        "current customer",
+        "in contact",
+        "familiar with",
+        "know us",
+        "working with",
+        "using our",
+        "past customer",
+    ]
+    return any(signal in text for signal in relationship_signals)
+
+
 def _build_prompt(
     product: str,
     goal: str,
@@ -38,24 +55,51 @@ def _build_prompt(
     reference_examples: str,
     audience_mode: str,
     feedback: str,
+    additional_reference: str,
 ) -> str:
     audience_instruction = (
         "New Customer: lead with trust-building, highlight the status-quo problem, and why change now."
         if audience_mode == "New Customer"
         else "Upsell: lean on the existing relationship, show how this is the natural next step for their size/revenue, and reflect established familiarity."
     )
-    feedback_instruction = ""
-    if feedback:
-        feedback_instruction = f"\nRecent live-call feedback: {feedback.strip()}"
+    
+    # Detect prior relationship
+    has_prior_relationship = _detect_prior_relationship(target_group)
+    relationship_instruction = ""
+    if has_prior_relationship:
+        relationship_instruction = (
+            "\n⚠️ CRITICAL: The Target Group indicates a prior relationship or brand awareness. "
+            "SKIP all brand introductions and 'what is [company]' explanations. "
+            "Start the conversation from relevance, not from zero. "
+            "Assume they know who you are—focus on WHY THIS MATTERS NOW for their specific context."
+        )
+    
+    # Elevate feedback and additional notes to hard constraints
+    hard_constraints = []
+    if feedback.strip():
+        hard_constraints.append(f"Recent call feedback (HIGH PRIORITY CONSTRAINT): {feedback.strip()}")
+    if additional_reference.strip():
+        hard_constraints.append(f"Additional constraint notes (MANDATORY): {additional_reference.strip()}")
+    
+    constraints_block = ""
+    if hard_constraints:
+        constraints_block = "\n\n🚨 MANDATORY CONSTRAINTS (failure to follow = script rejected):\n" + "\n".join(
+            f"- {constraint}" for constraint in hard_constraints
+        )
+    
     rewrite_objection = ""
     feedback_lower = feedback.lower()
     if any(keyword in feedback_lower for keyword in ["busy", "time", "no time", "too busy", "calendar"]):
         rewrite_objection = (
-            "\nAdjust Objection Handling to directly address 'I don't have time' for this persona. "
+            "\n- Objection Handling MUST directly address 'I don't have time' for this persona. "
             "Make it concise, respectful of time, and offer a frictionless next step."
         )
+    
     return f"""
-You are crafting a concise, ready-to-use cold calling script for a sales campaign.
+You are crafting a COLD OUTREACH calling script for a sales campaign.
+
+THIS IS NOT MARKETING COPY. THIS IS NOT A WEBSITE. THIS IS A REAL PHONE CALL.
+Be punchy, direct, and conversational. Eliminate copywriter fluff and corporate bullshit.
 
 Tone of Voice:
 {tone_of_voice.strip() or 'Professional yet conversational. Confident, concise, and helpful.'}
@@ -63,13 +107,14 @@ Tone of Voice:
 Reference Examples (analyze style/tone/structure, then mimic formatting + the "painless" approach used):
 {reference_examples.strip() or 'N/A'}
 
-Context Inputs:
+Context Inputs (STRICTLY FOLLOW THESE):
 - Product: {product.strip() or 'N/A'}
 - Goal: {goal}
 - Target Group: {target_group.strip() or 'N/A'}
 - Personas: {personas.strip() or 'N/A'}
 - Audience Focus: {audience_mode} ({audience_instruction})
-{feedback_instruction}
+{relationship_instruction}
+{constraints_block}
 
 Output Structure (cold call script, not a summary):
 1) Hook / Permission: brief opener that respects time (e.g., "Do you have 30 seconds to see if this is relevant?")
@@ -79,19 +124,21 @@ Output Structure (cold call script, not a summary):
 5) Close (CTA): clear ask for a 15-minute meeting
 6) Objection Handling: 3 examples in "If they say X, say Y" format, tailored to likely persona objections (e.g., "We already have a solution", "Send me an email")
 
-Constraints:
-- Maintain a professional yet conversational tone.
-- Be specific to the inputs above; avoid generic fluff.
-- Keep the script concise, skimmable, and immediately usable on a call.
-- Match the reference formatting conventions where possible (pacing, phrasing, bulleting, talking points, and "borrow X minutes" style).
-- Lean into a "painless" next step: low commitment, minimal effort for the prospect, clear value for giving 15 minutes.
+CRITICAL CONSTRAINTS:
+- This is COLD OUTREACH, not a brochure. Be direct, punchy, human.
+- STRICTLY follow the Target Group, Personas, and any Additional Reference Notes.
+- If the Target Group indicates prior relationship/brand awareness, START FROM RELEVANCE, not introductions.
+- Be SPECIFIC to the inputs above. Generic scripts will be rejected.
+- NO copywriter fluff. NO corporate jargon unless the reference examples use it.
+- Match the reference formatting conventions (pacing, phrasing, bulleting, "borrow X minutes" style).
+- Lean into a "painless" next step: low commitment, minimal effort for the prospect.
 - Output as clean Markdown with these exact section headers:
-  - Hook / Permission
-  - Why Now (Relevance)
-  - Discovery Questions
-  - Value Prop (The Tease)
-  - Close (CTA)
-  - Objection Handling
+  ## Hook / Permission
+  ## Why Now (Relevance)
+  ## Discovery Questions
+  ## Value Prop (The Tease)
+  ## Close (CTA)
+  ## Objection Handling
 {rewrite_objection}
 """.strip()
 
@@ -135,6 +182,7 @@ def generate_guide(
         reference_examples=reference_examples,
         audience_mode=audience_mode,
         feedback=feedback,
+        additional_reference=additional_reference,
     )
 
     try:
@@ -151,10 +199,14 @@ def generate_guide(
                 {
                     "role": "system",
                     "content": (
-                        "You create sharp, ready-to-use cold calling scripts. "
+                        "You create sharp, context-aware, ready-to-use COLD OUTREACH calling scripts. "
+                        "You are NOT writing marketing copy or website content—this is a REAL phone conversation. "
                         "Analyze provided reference examples and mimic their style, tone, and structure, "
                         'especially the "painless" low-friction approach. '
-                        "Sound professional yet conversational, and optimize for cold calls."
+                        "STRICTLY follow user-provided context (Target Group, Personas, Additional Notes, Feedback). "
+                        "If context indicates prior relationship or brand awareness, SKIP introductions and start from relevance. "
+                        "Be punchy, direct, conversational. Eliminate corporate fluff and generic messaging. "
+                        "Treat user feedback and additional reference notes as MANDATORY constraints."
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -202,14 +254,16 @@ def main() -> None:
             st.warning("`master_reference.md` not found or empty — generation will be less consistent.")
 
         additional_reference = st.text_area(
-            "Additional Reference Notes (optional)",
+            "Additional Constraints & Notes (optional)",
             height=90,
-            placeholder="Optional: extra notes or snippets to bias the style further.",
+            placeholder="E.g., 'Avoid corporate jargon', 'They already know our brand', 'Skip introductions'...",
+            help="These will be treated as MANDATORY constraints by the AI.",
         )
         feedback = st.text_area(
-            "Recent Feedback (optional)",
+            "Recent Call Feedback (optional)",
             height=100,
             placeholder="E.g., 'They keep saying they are too busy' or other objections heard live.",
+            help="High-priority feedback that will adjust the script generation.",
         )
         generate_clicked = st.button("Generate Script", use_container_width=True)
 
