@@ -2,7 +2,11 @@ import os
 from pathlib import Path
 
 import streamlit as st
+from dotenv import load_dotenv
 from openai import OpenAI
+
+
+load_dotenv()
 
 
 @st.cache_data(show_spinner=False)
@@ -109,10 +113,6 @@ def generate_guide(
     additional_reference: str,
     feedback: str,
 ) -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return "Missing OPENAI_API_KEY environment variable. Set it to generate guides."
-
     master_reference = read_master_reference()
     trimmed_master_reference, _ = _trim_reference_for_prompt(master_reference)
     reference_examples = trimmed_master_reference
@@ -138,6 +138,11 @@ def generate_guide(
     )
 
     try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            # UI should handle this before calling generation, but keep a safe guard here.
+            raise ValueError("Missing OPENAI_API_KEY")
+
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -210,6 +215,12 @@ def main() -> None:
 
     st.subheader("Cold Calling Script")
     if generate_clicked:
+        if not os.getenv("OPENAI_API_KEY"):
+            st.error(
+                "OPENAI_API_KEY is missing. Add it to your `.env` file (or your environment) and restart the app."
+            )
+            return
+
         with st.spinner("Generating guide with OpenAI..."):
             guide_text = generate_guide(
                 product=product,
